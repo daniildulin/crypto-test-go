@@ -68,6 +68,7 @@ func (h *Handler) Tx(w http.ResponseWriter, r *http.Request) {
 // возвращает false, чтобы вызывающий мог выйти.
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return false
