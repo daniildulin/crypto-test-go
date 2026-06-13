@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// Config повтоярет структуру config.json.
+// Config повторяет структуру config.json.
 type Config struct {
 	Server Server `json:"config"`
 	Gates  []Gate `json:"gates"`
