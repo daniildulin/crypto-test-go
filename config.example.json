@@ -1,0 +1,12 @@
+{
+  "config": {
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "gates": [
+    {
+      "name": "ethereum",
+      "mnemonic": "test test test test test test test test test test test junk"
+    }
+  ]
+}
