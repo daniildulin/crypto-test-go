@@ -18,6 +18,7 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "path to config.json")
+	signerKind := flag.String("signer", wallet.SignerWalletCore, "signer implementation: walletcore | native")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -25,7 +26,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	signer, err := wallet.NewEthSigner(cfg.Mnemonics())
+	signer, err := wallet.NewSigner(*signerKind, cfg.Mnemonics())
 	if err != nil {
 		log.Fatalf("signer: %v", err)
 	}
