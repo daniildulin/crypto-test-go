@@ -1,0 +1,7 @@
+.git
+bin/
+*.bundle
+coverage.out
+*.prof
+# боевой конфиг с mnemonic - в образ не попадает (монтируется в рантайме)
+config.json
