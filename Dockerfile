@@ -4,8 +4,8 @@
 # ---------------------------------------------------------------------------
 # Стадия 1: сборка нативной wallet-core, версия запинена на 2.6.34.
 # Базой берём официальный dev-образ wallet-core: в нём уже стоит нужный
-# тулчейн (clang-10 + libc++), boost и собранный protobuf 3.14 - ровно те
-# версии, что требует 2.6.34. Переключаем вендоренный исходник на тег с
+# тулчейн (clang-10), boost и собранный protobuf 3.14 - ровно те версии,
+# что требует 2.6.34. Переключаем вендоренный исходник на тег с
 # поддержкой EIP-1559 и пересобираем только саму библиотеку (без тестов).
 #
 # Почему 2.6.34: это последняя ветка wallet-core на чистом C++ (до перехода
@@ -25,7 +25,7 @@ RUN cd /wallet-core \
 
 # ---------------------------------------------------------------------------
 # Стадия 2: сборка нашего сервиса с cgo поверх wallet-core.
-# Тот же образ - значит тот же clang-10/libc++ ABI, что и у библиотеки;
+# Тот же образ - значит тот же clang-10/libstdc++ ABI, что и у библиотеки;
 # добавляем только Go. Здесь же прогоняем тесты wallet-core (-tags walletcore).
 # ---------------------------------------------------------------------------
 FROM wcbuild AS gobuild
@@ -36,7 +36,7 @@ ENV PATH=/usr/local/go/bin:$PATH \
     CC=clang-10 \
     CXX=clang++-10 \
     CGO_CFLAGS="-I/wallet-core/include" \
-    CGO_LDFLAGS="-L/wallet-core/buildwc -L/wallet-core/buildwc/trezor-crypto -L/wallet-core/build/local/lib -lTrustWalletCore -lprotobuf -lTrezorCrypto -lc++ -lc++abi -lpthread -lm"
+    CGO_LDFLAGS="-L/wallet-core/buildwc -L/wallet-core/buildwc/trezor-crypto -L/wallet-core/build/local/lib -lTrustWalletCore -lprotobuf -lTrezorCrypto -lstdc++ -lm"
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -45,11 +45,10 @@ RUN go test -tags walletcore ./... \
  && go build -tags walletcore -trimpath -o /walletd ./cmd/walletd
 
 # ---------------------------------------------------------------------------
-# Стадия 3: рантайм. cgo => не distroless-static; берём distroless/cc (glibc)
-# и докладываем динамические libc++ из стадии сборки.
+# Стадия 3: рантайм. cgo => не distroless-static; берём distroless/cc - в нём
+# уже есть glibc + libstdc++ + libgcc, ровно то, на что линкуется бинарь.
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/cc-debian12
-COPY --from=wcbuild /usr/lib/x86_64-linux-gnu/libc++.so.1 /usr/lib/x86_64-linux-gnu/libc++abi.so.1 /usr/lib/x86_64-linux-gnu/
 COPY --from=gobuild /walletd /walletd
 EXPOSE 8000
 
