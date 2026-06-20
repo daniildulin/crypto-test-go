@@ -19,7 +19,6 @@ import "C"
 import (
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math/big"
 	"unsafe"
 
@@ -123,8 +122,6 @@ func (s *walletCoreSigner) SignTx(gate string, p Path, tp TxParams) (SignedTx, e
 	if !isValidEthAddress(tp.To) {
 		return SignedTx{}, fmt.Errorf("invalid to address %q", tp.To)
 	}
-
-	log.Printf("[debug] sign gate=%s nonce=%d to=%s", gate, tp.Nonce, tp.To)
 
 	key := C.TWHDWalletGetDerivedKey(w, coinEthereum,
 		C.uint32_t(p.Account), C.uint32_t(p.Change), C.uint32_t(p.AddressIndex))
