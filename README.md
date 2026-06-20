@@ -4,6 +4,9 @@
 деривит HD-адреса, валидирует адреса и **подписывает транзакции оффлайн**. В RPC-ноду
 не ходит — broadcast делает Laravel-сторона.
 
+Криптография (деривация, адрес, подпись) идёт через **trustwallet/wallet-core** —
+как и требует ТЗ. Есть запасная чистая Go-реализация (см. «Реализации signer'а»).
+
 ## Эндпоинты
 
 Все эндпоинты — `POST` с JSON-телом.
@@ -48,13 +51,15 @@
 
 `m / 44' / 60' / account' / change / address_index` (SLIP-44 coin type 60 = Ethereum).
 Фиксированный префикс `44'/60'` живёт в сервисе; API передаёт только хвост пути.
+В wallet-core этому соответствует `TWHDWalletGetDerivedKey(coin, account, change, index)`.
 
 ## Архитектура
 
 ```
-cmd/walletd        точка входа: загрузка конфига, сборка signer'а, запуск, graceful shutdown
+cmd/walletd        точка входа: загрузка конфига, выбор signer'а, запуск, graceful shutdown
 internal/config    загрузка config.json + валидация
-internal/wallet    интерфейс Signer, HD-деривация, EthSigner (go-ethereum)
+internal/wallet    интерфейс Signer + две реализации (wallet-core / native) + HD-логика
+internal/wallet/wcproto/ethereum  сгенерированный Go-protobuf под wallet-core (Ethereum.proto)
 internal/api       HTTP-слой: dto, handlers, роутер (stdlib mux, method routing)
 ```
 
@@ -68,10 +73,41 @@ type Signer interface {
 }
 ```
 
-Текущая реализация (`EthSigner`) — **чистый Go** (`go-ethereum` + `tyler-smith/go-bip39`
-+ `go-bip32`), поэтому собирается с `CGO_ENABLED=0` и не требует нативных библиотек.
-Реализацию поверх trustwallet/wallet-core можно подставить за тем же интерфейсом, не трогая
-слой API.
+## Реализации signer'а
+
+Реализация выбирается флагом `--signer` (по умолчанию `walletcore`):
+
+- **`walletcore`** — боевая. Деривация, адрес и подпись (включая EIP-1559) делаются
+  нативной библиотекой `trustwallet/wallet-core` через cgo. Транзакция собирается как
+  `Ethereum.Proto.SigningInput` (`tx_mode = Enveloped`, `ContractGeneric{amount,data}` —
+  единообразно покрывает и нативный ETH-перевод, и ERC20 calldata от Laravel),
+  подписывается `TWAnySignerSign`. Компилируется **только** со сборочным тегом
+  `walletcore` (нужна нативная библиотека) — см. «Сборка wallet-core».
+
+- **`native`** — запасная. Чистый Go на `go-ethereum` + `go-bip39`/`go-bip32`, без cgo,
+  собирается с `CGO_ENABLED=0` в статический бинарь. Удобна для локального запуска и CI,
+  где нет нативной библиотеки.
+
+Выбор разведён по build-тегу: обычная сборка (`go build ./...`) не тянет cgo и содержит
+только `native`; боевой образ собирается с `-tags walletcore` и содержит обе реализации —
+флаг `--signer` переключает их в рантайме.
+
+## Сборка wallet-core
+
+`trustwallet/wallet-core` — это нативная C++ библиотека, она подключается из Go через cgo;
+чистого Go-варианта нет. Готового бинарного образа с EIP-1559 не существует (единственный
+публичный образ `trustwallet/wallet-core:latest` — 2021 года, поддерживает только legacy-
+транзакции), поэтому библиотека **собирается из исходников** в Docker, версия запинена.
+
+**Версия 2.6.34.** Это последняя ветка wallet-core на чистом C++ (в 3.x появился
+Rust-воркспейс), в которой **уже есть EIP-1559**. Так сборка легче и воспроизводимее, а в
+образ не тащится Rust-тулчейн. Boost / protobuf / clang берём готовыми из официального dev-
+образа wallet-core, переключаем исходник на тег 2.6.34 и пересобираем только саму
+библиотеку.
+
+Сборка с cgo использует `clang` + `libstdc++` (тот же тулчейн, что и у wallet-core/protobuf),
+поэтому рантайм-образ — не distroless-static, а `distroless/cc` (в нём есть glibc + libstdc++).
+Запасная `native`-сборка остаётся полностью статической (см. `Dockerfile.native`).
 
 ## Конфиг
 
@@ -89,27 +125,39 @@ type Signer interface {
 
 ## Запуск
 
+Локально (native signer, без cgo и без нативной библиотеки):
+
 ```bash
 cp config.example.json config.json   # потом впишите свой реальный mnemonic
-make run                             # или: go run ./cmd/walletd -config config.json
+make run                             # go run ... -signer native
 ```
 
-Docker:
+Боевой образ (signer на wallet-core, библиотека собирается из исходников):
 
 ```bash
 make docker
 docker run --rm -p 8000:8000 -v "$PWD/config.json:/config.json:ro" crypto-test-walletd
 ```
 
+Запасной образ без cgo (native signer, статический бинарь):
+
+```bash
+make docker-native
+```
+
 ## Тесты
 
 ```bash
-make test   # CGO_ENABLED=0 go test ./...
+make test            # CGO_ENABLED=0 go test ./...  - native-путь, быстро, без библиотеки
+make test-walletcore # тесты wallet-core (-tags walletcore) внутри Docker-сборки
 ```
 
-Покрытие: HD-деривация против известных hardhat-векторов, EIP-55 валидация, EIP-1559
-подпись (декодируем + восстанавливаем sender обратно в derived-адрес, проверка
-детерминизма), валидация конфига и HTTP-handlers.
+Покрытие native: HD-деривация против известных hardhat-векторов, EIP-55 валидация,
+EIP-1559 подпись (декодируем + восстанавливаем sender обратно в derived-адрес, проверка
+детерминизма), валидация конфига и HTTP-handlers. Тесты wallet-core дополнительно
+кросс-проверяют подпись: подписываем через wallet-core, декодируем и восстанавливаем
+sender через go-ethereum, сверяем с derived-адресом — две независимые реализации должны
+сходиться.
 
 ## Заметки по безопасности
 
