@@ -36,7 +36,7 @@ ENV PATH=/usr/local/go/bin:$PATH \
     CC=clang-10 \
     CXX=clang++-10 \
     CGO_CFLAGS="-I/wallet-core/include" \
-    CGO_LDFLAGS="-L/wallet-core/buildwc -L/wallet-core/buildwc/trezor-crypto -L/wallet-core/build/local/lib -lTrustWalletCore -lprotobuf -lTrezorCrypto -lc++ -lc++abi -lm"
+    CGO_LDFLAGS="-L/wallet-core/buildwc -L/wallet-core/buildwc/trezor-crypto -L/wallet-core/build/local/lib -lTrustWalletCore -lprotobuf -lTrezorCrypto -lc++ -lc++abi -lpthread -lm"
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
